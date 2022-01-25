@@ -33,27 +33,16 @@ flags.DEFINE_float('score', 0.25, 'score threshold')
 
 class_name = 'person'
 src_dir = '../val2017_roi/'
+saved_model_loaded = tf.saved_model.load(FLAGS.weights, tags=[tag_constants.SERVING])
 
 def createFolder(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-def main(_argv):
-    config = ConfigProto()
-    config.gpu_options.allow_growth = True
-    session = InteractiveSession(config=config)
-    STRIDES, ANCHORS, NUM_CLASS, XYSCALE = utils.load_config(FLAGS)
-    input_size = FLAGS.size
-    img_dir = src_dir+class_name+'/'
-    
-    file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
-    saved_model_loaded = tf.saved_model.load(FLAGS.weights, tags=[tag_constants.SERVING])
-
-    endIdx = len(file_names)-1
-    target_num = 20
-    target_pixel = 90
+def execute(target_num, target_pixel, img_dir, file_names):
     i = 0
-    flag = 0
+    trueSampleNum = 0
+    endIdx = len(file_names)-1
     while True:
         rand_idx = random.randint(0, endIdx)
         original_image = cv2.imread(img_dir+file_names[rand_idx])
@@ -101,21 +90,32 @@ def main(_argv):
             classes_f = classes.numpy()[0]
             for idx in range(0, len(scores_f)):
                 if scores_f[idx] > 0.25 and classes_f[idx] == 0:
-                    flag += 1
+                    trueSampleNum += 1
                     break
             pred_bbox = [boxes.numpy(), scores.numpy(), classes.numpy(), valid_detections.numpy()]
             image = utils.draw_bbox(img_pad, pred_bbox)
-            # image = utils.draw_bbox(image_data*255, pred_bbox)
             image = Image.fromarray(image.astype(np.uint8))
-            #image.show()
             image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
             createFolder('./'+class_name+'_'+str(target_pixel))
             cv2.imwrite('./'+class_name+'_'+str(target_pixel)+'/'+file_names[rand_idx], image)
             i += 1
             if i == target_num:
                 break
-    print(flag)
+    return trueSampleNum
+
+def main(_argv):
+    config = ConfigProto()
+    config.gpu_options.allow_growth = True
+    session = InteractiveSession(config=config)
+    STRIDES, ANCHORS, NUM_CLASS, XYSCALE = utils.load_config(FLAGS)
+    input_size = FLAGS.size
+    img_dir = src_dir+class_name+'/'
     
+    file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
+
+    target_num = 100
+    target_pixel = 20
+    execute(target_num, target_pixel, img_dir, file_names)
 
     
 if __name__ == '__main__':
