@@ -47,6 +47,7 @@ def main(_argv):
     img_dir = src_dir+class_name+'/'
     
     file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
+    saved_model_loaded = tf.saved_model.load(FLAGS.weights, tags=[tag_constants.SERVING])
 
     endIdx = len(file_names)-1
     target_num = 20
@@ -80,7 +81,6 @@ def main(_argv):
             images_data.append(img_data)
             images_data = np.asarray(images_data).astype(np.float32)
 
-            saved_model_loaded = tf.saved_model.load(FLAGS.weights, tags=[tag_constants.SERVING])
             infer = saved_model_loaded.signatures['serving_default']
             batch_data = tf.constant(images_data)
             pred_bbox = infer(batch_data)
