@@ -4,7 +4,8 @@
 #https://linuxtut.com/en/540d3be3e570cbca644e/
 #Applying mAP
 #https://ctkim.tistory.com/79
-
+#Use AP
+#https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html
 
 import tensorflow as tf
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -23,6 +24,7 @@ from tensorflow.compat.v1 import InteractiveSession
 import os
 from os.path import isfile, join
 import random
+from sklearn.metrics import average_precision_score
 
 flags.DEFINE_string('weights', './checkpoints/yolov4-416',
                     'path to weights file')
@@ -55,7 +57,7 @@ def get_iou(box1, box2):
     common_area = get_intersection_area(box1, box2)
     return common_area / (box1_area + box2_area - common_area)
 
-def get_padded_image(endIdx, file_names, img_dir, target_pixel):
+def get_info_for_inference(endIdx, file_names, img_dir, target_pixel):
     while True:
         rand_idx = random.randint(0, endIdx)
         roi_name = file_names[rand_idx]
@@ -63,7 +65,7 @@ def get_padded_image(endIdx, file_names, img_dir, target_pixel):
         original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
         dims = original_image.shape
         larger_axis_idx = 0 if dims[0] > dims[1] else 1
-        if dims[larger_axis_idx] < target_pixel:
+        if dims[larger_axis_idx] > target_pixel:
             break
     smaller_axis_idx = 1 - larger_axis_idx
     larger_length = dims[larger_axis_idx]
@@ -79,74 +81,91 @@ def get_padded_image(endIdx, file_names, img_dir, target_pixel):
     nm_gtb = np.array(cv2_gtb) / 416
     return img_pad, roi_name, nm_gtb
 
+def get_inference_results(img_pad, saved_model_loaded):
+    img_data = img_pad / 255.
+    images_data = []
+    images_data.append(img_data)
+    images_data = np.asarray(images_data).astype(np.float32)
+    batch_data = tf.constant(images_data)
+
+    infer = saved_model_loaded.signatures['serving_default']
+    return infer(batch_data)
+
+def get_nms_result(pred_bbox):
+    for key, value in pred_bbox.items():
+        boxes = value[:, :, 0:4]
+        pred_conf = value[:, :, 4:]
+
+    return tf.image.combined_non_max_suppression(
+        boxes=tf.reshape(boxes, (tf.shape(boxes)[0], -1, 1, 4)),
+        scores=tf.reshape(
+            pred_conf, (tf.shape(pred_conf)[0], -1, tf.shape(pred_conf)[-1])),
+        max_output_size_per_class=50,
+        max_total_size=50,
+        iou_threshold=FLAGS.iou,
+        score_threshold=FLAGS.score
+    )
+
+def get_mIoU_infos(boxes, scores, classes, class_num, nm_gtb):
+    boxes_f = boxes.numpy()[0]
+    scores_f = scores.numpy()[0]
+    classes_f = classes.numpy()[0]
+    iou_done = False
+    bbox_found = False
+    largest_box = None
+    largest_area = 0
+
+    iou_to_add = 0
+    no_target_to_add = 0
+    no_bbox_to_add = 0
+
+    for idx in range(0, len(scores_f)):
+        if scores_f[idx] > 0.25 and classes_f[idx] == class_num:
+            box = boxes_f[idx]
+            area = get_area(box)
+            if largest_area < area:
+                largest_area = area
+                largest_box = box
+            iou_done = True
+    if iou_done:
+        iou_to_add += get_iou(largest_box, nm_gtb)
+    if not iou_done:
+        for idx in range(0, len(scores_f)):
+            if scores_f[idx] > 0.25:
+                no_target_to_add += 1
+                bbox_found = True
+                break
+        if not bbox_found:
+            no_bbox_to_add +=1
+    return iou_to_add, no_target_to_add, no_bbox_to_add
+
+def save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name):
+    pred_bbox = [boxes.numpy(), scores.numpy(), classes.numpy(), valid_detections.numpy()]
+    image = utils.draw_bbox(img_pad, pred_bbox)
+    image = Image.fromarray(image.astype(np.uint8))
+    image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
+    createFolder('./'+class_name+'_'+str(target_pixel))
+    cv2.imwrite('./'+class_name+'_'+str(target_pixel)+'/'+roi_name, image)
+
 def execute_AP(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
     return
 
 def execute_mIoU(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
-    i = 0
     no_bbox = 0
     no_target = 0
     iouSum = 0
     endIdx = len(file_names)-1
-    while True:
-        img_pad, roi_name, nm_gtb = get_padded_image(endIdx, file_names, img_dir, target_pixel)
+    for _ in range(target_num):
+        img_pad, roi_name, nm_gtb = get_info_for_inference(endIdx, file_names, img_dir, target_pixel)
+        pred_bbox = get_inference_results(img_pad, saved_model_loaded)
+        boxes, scores, classes, valid_detections = get_nms_result(pred_bbox)
+
+        iou_ta, not_ta, nob_ta = get_mIoU_infos(boxes, scores, classes, class_num, nm_gtb)
+        iouSum += iou_ta
+        no_target += not_ta
+        no_bbox += nob_ta
         
-        img_data = img_pad / 255.
-        images_data = []
-        images_data.append(img_data)
-        images_data = np.asarray(images_data).astype(np.float32)
-
-        infer = saved_model_loaded.signatures['serving_default']
-        batch_data = tf.constant(images_data)
-        pred_bbox = infer(batch_data)
-        for key, value in pred_bbox.items():
-            boxes = value[:, :, 0:4]
-            pred_conf = value[:, :, 4:]
-
-        boxes, scores, classes, valid_detections = tf.image.combined_non_max_suppression(
-            boxes=tf.reshape(boxes, (tf.shape(boxes)[0], -1, 1, 4)),
-            scores=tf.reshape(
-                pred_conf, (tf.shape(pred_conf)[0], -1, tf.shape(pred_conf)[-1])),
-            max_output_size_per_class=50,
-            max_total_size=50,
-            iou_threshold=FLAGS.iou,
-            score_threshold=FLAGS.score
-        )
-        boxes_f = boxes.numpy()[0]
-        scores_f = scores.numpy()[0]
-        classes_f = classes.numpy()[0]
-        iou_done = False
-        bbox_found = False
-        largest_box = None
-        largest_area = 0
-        for idx in range(0, len(scores_f)):
-            if scores_f[idx] > 0.25 and classes_f[idx] == class_num:
-                box = boxes_f[idx]
-                area = get_area(box)
-                if largest_area < area:
-                    largest_area = area
-                    largest_box = box
-                iou_done = True
-        if iou_done:
-            iouSum += get_iou(largest_box, nm_gtb)
-        if not iou_done:
-            for idx in range(0, len(scores_f)):
-                if scores_f[idx] > 0.25:
-                    no_target += 1
-                    bbox_found = True
-                    break
-            if not bbox_found:
-                no_bbox +=1
-
-        pred_bbox = [boxes.numpy(), scores.numpy(), classes.numpy(), valid_detections.numpy()]
-        image = utils.draw_bbox(img_pad, pred_bbox)
-        image = Image.fromarray(image.astype(np.uint8))
-        image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
-        createFolder('./'+class_name+'_'+str(target_pixel))
-        cv2.imwrite('./'+class_name+'_'+str(target_pixel)+'/'+roi_name, image)
-        i += 1
-        if i == target_num:
-            break
+        save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name)
     return no_bbox, no_target, iouSum / target_num
 
 def main(_argv):
@@ -159,15 +178,19 @@ def main(_argv):
     
     #class_name = 'person'
     #class_num = 0
-    class_names = ['dog', 'cat']
-    class_nums = [16, 15]
+    #class_names = ['dog', 'cat']
+    #class_nums = [16, 15]
+
+    class_names = ['cat']
+    class_nums = [15]
     
     for i in range(len(class_names)):
         class_name = class_names[i]
         class_num = class_nums[i]
         img_dir = src_dir+class_name+'/'
         file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
-        target_pixels = [20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,120,150,200,250,300,416]
+        #target_pixels = [20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,120,150,200,250,300,416]
+        target_pixels =[416]
         target_num = 200
         for target_pixel in target_pixels:
             no_bbox_count, no_target_count, mIoU = execute_mIoU(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num)
