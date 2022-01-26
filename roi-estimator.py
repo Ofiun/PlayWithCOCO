@@ -6,7 +6,11 @@
 #https://ctkim.tistory.com/79
 #Use AP
 #https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html
+#Show PR Curve
+#https://scikit-learn.org/stable/modules/generated/sklearn.metrics.PrecisionRecallDisplay.html
 
+from cv2 import threshold
+from numpy import average
 import tensorflow as tf
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 if len(physical_devices) > 0:
@@ -25,6 +29,8 @@ import os
 from os.path import isfile, join
 import random
 from sklearn.metrics import average_precision_score
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_recall_curve, PrecisionRecallDisplay
 
 flags.DEFINE_string('weights', './checkpoints/yolov4-416',
                     'path to weights file')
@@ -139,6 +145,50 @@ def get_mIoU_infos(boxes, scores, classes, class_num, nm_gtb):
             no_bbox_to_add +=1
     return iou_to_add, no_target_to_add, no_bbox_to_add
 
+def get_ap_infos(boxes, scores, classes, class_num, nm_gtb):
+    boxes_f = boxes.numpy()[0]
+    scores_f = scores.numpy()[0]
+    classes_f = classes.numpy()[0]
+    largest_box_flag = False
+    ap_done = False
+    bbox_found = False
+    largest_box = None
+    largest_area = 0
+    largest_box_confidence = 0
+
+    y_score_to_append = 0
+    no_target_to_add = 0
+    no_bbox_to_add = 0
+
+    for idx in range(0, len(scores_f)):
+        if scores_f[idx] >= 0.25 and classes_f[idx] == class_num:
+            box = boxes_f[idx]
+            area = get_area(box)
+            if largest_area < area:
+                largest_area = area
+                largest_box = box
+                largest_box_confidence = scores_f[idx]
+            largest_box_flag = True
+    if largest_box_flag:
+        if get_iou(largest_box, nm_gtb) > 0.5:
+            y_score_to_append = largest_box_confidence
+            ap_done = True
+    if not ap_done:
+        for idx in range(0, len(scores_f)):
+            if scores_f[idx] > 0.25:
+                no_target_to_add += 1
+                bbox_found = True
+                break
+        if not bbox_found:
+            no_bbox_to_add +=1
+    return y_score_to_append, no_target_to_add, no_bbox_to_add
+
+def visualize_pr_curve(y_trues, y_scores):
+    precision, recall, _ = precision_recall_curve(y_trues, y_scores)
+    disp = PrecisionRecallDisplay(precision, recall)
+    disp.plot()
+    plt.show()
+
 def save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name):
     pred_bbox = [boxes.numpy(), scores.numpy(), classes.numpy(), valid_detections.numpy()]
     image = utils.draw_bbox(img_pad, pred_bbox)
@@ -147,8 +197,28 @@ def save_inference_result(boxes, scores, classes, valid_detections, img_pad, cla
     createFolder('./'+class_name+'_'+str(target_pixel))
     cv2.imwrite('./'+class_name+'_'+str(target_pixel)+'/'+roi_name, image)
 
-def execute_AP(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
-    return
+def execute_ap(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
+    no_bbox = 0
+    no_target = 0
+    y_trues = [1] * target_num
+    y_scores = []
+    
+    endIdx = len(file_names)-1
+    for _ in range(target_num):
+        img_pad, roi_name, nm_gtb = get_info_for_inference(endIdx, file_names, img_dir, target_pixel)
+        pred_bbox = get_inference_results(img_pad, saved_model_loaded)
+        boxes, scores, classes, valid_detections = get_nms_result(pred_bbox)
+
+        y_score, not_ta, nob_ta = get_ap_infos(boxes, scores, classes, class_num, nm_gtb)
+        y_scores.append(y_score)
+        no_target += not_ta
+        no_bbox += nob_ta
+        
+        save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name)
+
+    #visualize_pr_curve(y_trues, y_scores)
+    ap = average_precision_score(y_trues, y_scores)
+    return no_bbox, no_target, ap
 
 def execute_mIoU(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
     no_bbox = 0
@@ -190,11 +260,13 @@ def main(_argv):
         img_dir = src_dir+class_name+'/'
         file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
         #target_pixels = [20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,120,150,200,250,300,416]
-        target_pixels =[416]
+        target_pixels =[200]
         target_num = 200
         for target_pixel in target_pixels:
             no_bbox_count, no_target_count, mIoU = execute_mIoU(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num)
             print("target pixel (",target_pixel,"): no bbox (",no_bbox_count,") | no target (",no_target_count,") | mIoU (",mIoU,")")
+            #no_bbox_count, no_target_count, ap = execute_ap(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num)
+            #print("target pixel (",target_pixel,"): no bbox (",no_bbox_count,") | no target (",no_target_count,") | ap (",ap,")")
     
 if __name__ == '__main__':
     try:
