@@ -46,9 +46,9 @@ flags.DEFINE_string('output', 'result.png', 'path to output image')
 flags.DEFINE_float('iou', 0.45, 'iou threshold')
 flags.DEFINE_float('score', 0.25, 'score threshold')
 
-target_class_names = ['person', 'dog', 'cat']
-target_yolo_ids = [0, 16, 15]
-target_coco_ids = [1, 18, 17]
+target_class_names = ['person', 'dog', 'cat', 'bicycle', 'car', 'motorcycle', 'bus', 'boat', 'bird', 'horse', 'handbag', 'tie']
+target_yolo_ids = [0, 16, 15, 1, 2, 3, 5, 8, 15, 17, 26, 27]
+target_coco_ids = [1, 18, 17, 2, 3, 4, 6, 9, 16, 19, 31, 32]
 target_ap_infos = {}
 
 def createFolder(directory):
