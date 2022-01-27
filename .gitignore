@@ -1,4 +1,8 @@
 *.json
-*/
+checkpoints/
+core/
+data/
+person_200/
+ap/
 fig_raw.png
 result.png
