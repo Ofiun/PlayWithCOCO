@@ -41,7 +41,6 @@ flags.DEFINE_string('output', 'result.png', 'path to output image')
 flags.DEFINE_float('iou', 0.45, 'iou threshold')
 flags.DEFINE_float('score', 0.25, 'score threshold')
 
-src_dir = '../val2017_roi/'
 
 def createFolder(directory):
     if not os.path.exists(directory):
@@ -111,6 +110,20 @@ def get_nms_result(pred_bbox):
         iou_threshold=FLAGS.iou,
         score_threshold=FLAGS.score
     )
+
+def visualize_pr_curve(y_trues, y_scores):
+    precision, recall, _ = precision_recall_curve(y_trues, y_scores)
+    disp = PrecisionRecallDisplay(precision, recall)
+    disp.plot()
+    plt.show()
+
+def save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name):
+    pred_bbox = [boxes.numpy(), scores.numpy(), classes.numpy(), valid_detections.numpy()]
+    image = utils.draw_bbox(img_pad, pred_bbox)
+    image = Image.fromarray(image.astype(np.uint8))
+    image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
+    createFolder('./'+class_name+'_'+str(target_pixel))
+    cv2.imwrite('./'+class_name+'_'+str(target_pixel)+'/'+roi_name, image)
 
 def get_mIoU_infos(boxes, scores, classes, class_num, nm_gtb):
     boxes_f = boxes.numpy()[0]
@@ -183,19 +196,23 @@ def get_ap_infos(boxes, scores, classes, class_num, nm_gtb):
             no_bbox_to_add +=1
     return y_score_to_append, no_target_to_add, no_bbox_to_add
 
-def visualize_pr_curve(y_trues, y_scores):
-    precision, recall, _ = precision_recall_curve(y_trues, y_scores)
-    disp = PrecisionRecallDisplay(precision, recall)
-    disp.plot()
-    plt.show()
+def execute_mIoU(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
+    no_bbox = 0
+    no_target = 0
+    iouSum = 0
+    endIdx = len(file_names)-1
+    for _ in range(target_num):
+        img_pad, roi_name, nm_gtb = get_info_for_inference(endIdx, file_names, img_dir, target_pixel)
+        pred_bbox = get_inference_results(img_pad, saved_model_loaded)
+        boxes, scores, classes, valid_detections = get_nms_result(pred_bbox)
 
-def save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name):
-    pred_bbox = [boxes.numpy(), scores.numpy(), classes.numpy(), valid_detections.numpy()]
-    image = utils.draw_bbox(img_pad, pred_bbox)
-    image = Image.fromarray(image.astype(np.uint8))
-    image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
-    createFolder('./'+class_name+'_'+str(target_pixel))
-    cv2.imwrite('./'+class_name+'_'+str(target_pixel)+'/'+roi_name, image)
+        iou_ta, not_ta, nob_ta = get_mIoU_infos(boxes, scores, classes, class_num, nm_gtb)
+        iouSum += iou_ta
+        no_target += not_ta
+        no_bbox += nob_ta
+        
+        save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name)
+    return no_bbox, no_target, iouSum / target_num
 
 def execute_ap(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
     no_bbox = 0
@@ -216,27 +233,10 @@ def execute_ap(target_num, target_pixel, img_dir, file_names, saved_model_loaded
         
         save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name)
 
-    #visualize_pr_curve(y_trues, y_scores)
+    visualize_pr_curve(y_trues, y_scores)
     ap = average_precision_score(y_trues, y_scores)
     return no_bbox, no_target, ap
 
-def execute_mIoU(target_num, target_pixel, img_dir, file_names, saved_model_loaded, class_name, class_num):
-    no_bbox = 0
-    no_target = 0
-    iouSum = 0
-    endIdx = len(file_names)-1
-    for _ in range(target_num):
-        img_pad, roi_name, nm_gtb = get_info_for_inference(endIdx, file_names, img_dir, target_pixel)
-        pred_bbox = get_inference_results(img_pad, saved_model_loaded)
-        boxes, scores, classes, valid_detections = get_nms_result(pred_bbox)
-
-        iou_ta, not_ta, nob_ta = get_mIoU_infos(boxes, scores, classes, class_num, nm_gtb)
-        iouSum += iou_ta
-        no_target += not_ta
-        no_bbox += nob_ta
-        
-        save_inference_result(boxes, scores, classes, valid_detections, img_pad, class_name, target_pixel, roi_name)
-    return no_bbox, no_target, iouSum / target_num
 
 def main(_argv):
     config = ConfigProto()
@@ -246,18 +246,19 @@ def main(_argv):
     saved_model_loaded = tf.saved_model.load(FLAGS.weights, tags=[tag_constants.SERVING])
     input_size = FLAGS.size
     
-    #class_name = 'person'
-    #class_num = 0
-    #class_names = ['dog', 'cat']
-    #class_nums = [16, 15]
+    #class_names = ['person', 'dog', 'cat']
+    #class_nums = [0, 16, 15]
 
-    class_names = ['cat']
-    class_nums = [15]
+    src_dir = '../val2017_roi/'
+    class_names = ['person']
+    class_nums = [0]
     
     for i in range(len(class_names)):
         class_name = class_names[i]
         class_num = class_nums[i]
+
         img_dir = src_dir+class_name+'/'
+
         file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
         #target_pixels = [20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,120,150,200,250,300,416]
         target_pixels =[200]
