@@ -12,7 +12,6 @@
 #https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocotools/cocoeval.py
 
 
-from re import A
 from cv2 import threshold
 from numpy import average
 import tensorflow as tf
@@ -46,10 +45,16 @@ flags.DEFINE_string('output', 'result.png', 'path to output image')
 flags.DEFINE_float('iou', 0.45, 'iou threshold')
 flags.DEFINE_float('score', 0.25, 'score threshold')
 
-target_class_names = ['person', 'dog', 'cat', 'bicycle', 'car', 'motorcycle', 'bus', 'boat', 'bird', 'horse', 'handbag', 'tie']
-target_yolo_ids = [0, 16, 15, 1, 2, 3, 5, 8, 15, 17, 26, 27]
-target_coco_ids = [1, 18, 17, 2, 3, 4, 6, 9, 16, 19, 31, 32]
+with open('./data/classes/coco.names') as names:
+    target_class_names = [line.rstrip() for line in names]
+target_yolo_ids = list(range(80))
+target_coco_ids = list(range(1,12))+list(range(13,26))+[27, 28]+list(range(31,45))+\
+                    list(range(46,66))+[67]+[70]+list(range(72,83))+list(range(84,91))
 target_ap_infos = {}
+
+def init_target_ap_infos():
+    for i in range(90):
+        target_ap_infos[str(i)] = []
 
 def createFolder(directory):
     if not os.path.exists(directory):
@@ -116,14 +121,8 @@ def get_index(num, nums):
     for i in range(len(nums)):
         if num == nums[i]:
             return i
-    print("get_index error")
+    print("get_index error ",nums)
     return -1
-
-def add_to_ap_infos(target_name, info):
-    if target_name not in target_ap_infos:
-        target_ap_infos[target_name] = [info]
-    else:
-        target_ap_infos[target_name].append(info)
 
 def convert_coco_box(gt_box, dims):
     height_pixels = dims[0]
@@ -137,58 +136,47 @@ def get_ap_infos(boxes, scores, classes, gt_tuples, file_name, dims):
     classes_f = classes.numpy()[0]
 
     for idx in range(0, len(scores_f)):
-        if scores_f[idx] > 0 and classes_f[idx] in target_yolo_ids:
-            yolo_id = classes_f[idx]
+        yolo_id = classes_f[idx]
+        if scores_f[idx] > 0:
             class_idx = get_index(yolo_id, target_yolo_ids)
             coco_id = target_coco_ids[class_idx]
             box = boxes_f[idx]
-            gt_found = False
-            for gt_tuple in gt_tuples[:]:
-                gt_box = convert_coco_box(gt_tuple[1], dims)
-                if gt_tuple[0] == coco_id and get_iou(box, gt_box) > 0.5:
-                    # True Positive
-                    target_name = target_class_names[class_idx]
-                    add_to_ap_infos(target_name, [1, scores_f[idx]])
-                    #print('TP :: ', file_name, ' ', target_name, ' ', 1, ' ', scores_f[idx])
-                    gt_found = True
-                    gt_tuples.remove(gt_tuple)
-                    break
-            if not gt_found:
-                # False Positive
-                target_name = target_class_names[class_idx]
-                add_to_ap_infos(target_name, [0, scores_f[idx]])
-                print('FP :: ', file_name, ' ', target_name, ' ', 0, ' ', scores_f[idx])
-        elif scores_f[idx] > 0:
-            box = boxes_f[idx]
-            for gt_tuple in gt_tuples[:]:
-                gt_box = convert_coco_box(gt_tuple[1], dims)
-                if get_iou(box, gt_box) > 0.5:
-                    coco_id = gt_tuples[0]
-                    if coco_id in target_coco_ids:
-                        # False Negative
-                        # Misdetect target as another class
-                        class_idx = get_index(coco_id, target_coco_ids)
-                        target_name = target_class_names[class_idx]
-                        add_to_ap_infos(target_name, [0, scores_f[idx]])
-                        print('FN-Mis :: ', file_name, ' ', target_name, ' ', 0, ' ', scores_f[idx])
+            if len(gt_tuples) == 0:
+                target_ap_infos[str(int(yolo_id))].append([0, scores_f[idx]])
+            else:
+                gt_flag = False
+                for gt_tuple in gt_tuples[:]:
+                    gt_box = convert_coco_box(gt_tuple[1], dims)
+                    if get_iou(box, gt_box) > 0.5:
+                        label = 1 if gt_tuple[0] == coco_id else 0
+                        target_ap_infos[str(int(yolo_id))].append([label, scores_f[idx]])
+                        if label == 0:
+                            gt_idx = gt_tuple[0]
+                            gt_class_idx = get_index(gt_idx, target_coco_ids)
+                            gt_yolo_id = target_yolo_ids[gt_class_idx]
+                            target_ap_infos[str(gt_yolo_id)].append([0, scores_f[idx]])
+                        gt_tuples.remove(gt_tuple)
+                        gt_flag = True
+                        break
+                if not gt_flag:
+                    target_ap_infos[str(int(yolo_id))].append([0, scores_f[idx]])
     # Failed to detect target.
     for gt_tuple in gt_tuples[:]:
-        coco_id = gt_tuples[0]
+        coco_id = gt_tuple[0]
         if coco_id in target_coco_ids:
             # False Negative
             # Did Not detect the target.
             class_idx = get_index(coco_id, target_coco_ids)
-            target_name = target_class_names[class_idx]
-            add_to_ap_infos(target_name, [0, scores_f[idx]])
-            print('FN-Non :: ', file_name, ' ', target_name, ' ', 0, ' ', scores_f[idx])
+            yolo_id = target_yolo_ids[class_idx]
+            target_ap_infos[str(int(yolo_id))].append([0, scores_f[idx]])
             gt_tuples.remove(gt_tuple)
 
 def execute_ap(target_num, img_dir, file_names, saved_model_loaded, img_seg_dict):
     endIdx = len(file_names)-1
     for i in range(target_num):
-        rand_idx = random.randint(0, endIdx)
-        file_name = file_names[rand_idx]
-        #file_name = file_names[i]
+        '''rand_idx = random.randint(0, endIdx)
+        file_name = file_names[rand_idx]'''
+        file_name = file_names[i]
 
         original_image = cv2.imread(img_dir+file_name)
         original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
@@ -203,15 +191,19 @@ def execute_ap(target_num, img_dir, file_names, saved_model_loaded, img_seg_dict
             print(i,'-th')
 
     aps = []
-    for class_type in target_ap_infos:
-        class_info = target_ap_infos[class_type]
+    for i in range(len(target_yolo_ids)):
+        yolo_id = target_yolo_ids[i]
+        class_info = target_ap_infos[str(yolo_id)]
         class_info = np.array(class_info)
-        y_true = class_info[:,0]
-        y_scores = class_info[:,1]
-        visualize_pr_curve(y_true, y_scores)
-        ap = average_precision_score(y_true, y_scores)
-        aps.append(ap)
-        print(class_type,' ',ap,' sample num (',len(y_true),')')
+        if len(class_info) > 0:
+            y_true = class_info[:,0]
+            y_scores = class_info[:,1]
+            #visualize_pr_curve(y_true, y_scores)
+            ap = average_precision_score(y_true, y_scores) 
+            ap = ap if not np.isnan(ap) else 0
+            aps.append(ap)
+            class_name = target_class_names[i]
+            print(class_name,' ',ap,' sample num (',len(y_true),') y_true (',sum(y_true),')')
     return sum(aps) / len(aps)
 
 def main(_argv):
@@ -229,7 +221,8 @@ def main(_argv):
 
     img_dir = src_dir
     file_names = [f for f in os.listdir(img_dir) if isfile(join(img_dir, f))]
-    target_num = 500
+    target_num = 5000
+    init_target_ap_infos()
     map = execute_ap(target_num, img_dir, file_names, saved_model_loaded, img_seg_dict)
     print('map: ',map)
     
