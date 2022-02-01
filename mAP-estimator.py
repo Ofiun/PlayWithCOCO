@@ -164,11 +164,10 @@ def get_ap_infos(boxes, scores, classes, gt_tuples, file_name, dims):
     for gt_tuple in gt_tuples[:]:
         coco_id = gt_tuple[0]
         if coco_id in target_coco_ids:
-            # False Negative
             # Did Not detect the target.
             class_idx = get_index(coco_id, target_coco_ids)
             yolo_id = target_yolo_ids[class_idx]
-            target_ap_infos[str(int(yolo_id))].append([0, scores_f[idx]])
+            target_ap_infos[str(int(yolo_id))].append([0, 1])
             gt_tuples.remove(gt_tuple)
 
 def execute_ap(target_num, img_dir, file_names, saved_model_loaded, img_seg_dict):
