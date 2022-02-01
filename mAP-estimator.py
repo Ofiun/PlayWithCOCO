@@ -74,7 +74,10 @@ def get_iou(box1, box2):
     box1_area = get_area(box1)
     box2_area = get_area(box2)
     common_area = get_intersection_area(box1, box2)
-    return common_area / (box1_area + box2_area - common_area)
+    iou = common_area / (box1_area + box2_area - common_area)
+    # Heuristics to prevent floating point division underflow
+    iou = iou if iou <= 1 else 0
+    return iou
 
 def get_inference_results(original_image, saved_model_loaded):
     image_data = cv2.resize(original_image, (416, 416))
