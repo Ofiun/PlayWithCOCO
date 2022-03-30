@@ -26,6 +26,7 @@ def select_person_bbox_from_gt():
     video_list = ['1','2','3','4','6']
     for video_num in video_list:
         gt_dict = {}
+        new_gt_dict = {}
         with open('./data/gt_'+video_num+'.json', 'r') as gt_json:
             gt_dict = json.load(gt_json)
         for gt_key in gt_dict.keys():
@@ -34,9 +35,10 @@ def select_person_bbox_from_gt():
             for box in boxes:
                 if box[0] == "1":
                     person_box_list.append(box)
-            gt_dict[gt_key] = person_box_list
-        with open('./data/gt_'+video_num+'_person.json', 'w') as gt_json:
-            json.dump(gt_dict, gt_json, indent='\t')
+            if len(person_box_list) != 0:
+                new_gt_dict[gt_key] = person_box_list
+        with open('./frame_statistics/gt_'+video_num+'_person.json', 'w') as gt_json:
+            json.dump(new_gt_dict, gt_json, indent='\t')
 
 #convert_log_to_json()
 select_person_bbox_from_gt()
