@@ -52,40 +52,69 @@ def get_miou(log_boxes, gt_boxes):
 
 video_list = ['1','2','3','4','6']
 roi_size_list = ['120','160','200']
+#window_sizes = [1, 5, 10, 20, 30]
+window_sizes = [1]
 
+def get_miou_list():
+    for window_size in window_sizes:
+        video_dict = {}
+        for video_num in video_list:
+            gt_dict = {}
+            N = window_size
+            with open('./data/gt_'+video_num+'_person.json','r') as gt_json:
+                gt_dict = json.load(gt_json)
+            miou_dict = {}
+            for roi_size in roi_size_list:
+                log_dict = {}
+                with open('./data/log_'+video_num+'_'+roi_size+'.json','r') as log_json:
+                    log_dict = json.load(log_json)
+                gt_keys = list(gt_dict.keys())
+                log_keys = list(log_dict.keys())
+                gt_end = gt_keys[-1]
+                miou_list = []
+                frames = list(range(int(gt_end)+1))
+                for i in frames:
+                    frame_key = str(i)
+                    if frame_key in log_keys and frame_key in gt_keys:
+                        miou = get_miou(log_dict[frame_key], gt_dict[frame_key])
+                        miou_list.append(miou)
+                    elif frame_key in log_keys and frame_key not in gt_keys:
+                        # FP
+                        miou_list.append(0)
+                    elif frame_key not in log_keys and frame_key in gt_keys:
+                        # FN
+                        miou_list.append(0)
+                    else:
+                        miou_list.append(0)
+                miou_list = np.convolve(miou_list, np.ones(N)/N, mode='valid')
+                miou_dict[str(roi_size)] = miou_list.tolist()
+                #plt.plot(range(len(miou_list)), miou_list, label=roi_size)
+            video_dict[str(video_num)] = miou_dict
+            '''plt.title('mIoU variations of Video '+video_num)
+            plt.xlabel('Frame Number')
+            plt.ylabel('mIoU')
+            plt.legend()
+            plt.savefig('./data/video_'+video_num+'_window_'+str(N)+'.png')
+            plt.cla()'''
+        with open('./miou_list.json', 'w') as w:
+            json.dump(video_dict,w)
+
+#get_miou_list()
+with open('./data/miou_list.json', 'r') as r:
+    video_miou_dict = json.load(r)
 for video_num in video_list:
-    gt_dict = {}
-    N=1
-    with open('./data/gt_'+video_num+'_person.json','r') as gt_json:
-        gt_dict = json.load(gt_json)
-    for roi_size in roi_size_list:
-        log_dict = {}
-        with open('./data/log_'+video_num+'_'+roi_size+'.json','r') as log_json:
-            log_dict = json.load(log_json)
-
-        gt_keys = list(gt_dict.keys())
-        log_keys = list(log_dict.keys())
-        gt_end = gt_keys[-1]
-        miou_list = []
-        frames = list(range(int(gt_end)+1))
-        for i in frames:
-            frame_key = str(i)
-            if frame_key in log_keys and frame_key in gt_keys:
-                miou = get_miou(log_dict[frame_key], gt_dict[frame_key])
-                miou_list.append(miou)
-            elif frame_key in log_keys and frame_key not in gt_keys:
-                # FP
-                miou_list.append(0)
-            elif frame_key not in log_keys and frame_key in gt_keys:
-                # FN
-                miou_list.append(0)
-            else:
-                miou_list.append(0)
-        miou_list = np.convolve(miou_list, np.ones(N)/N, mode='valid')
-        plt.plot(range(len(miou_list)), miou_list, label=roi_size)
-    plt.title('mIoU variations of Video '+video_num)
-    plt.xlabel('Frame Number')
-    plt.ylabel('mIoU')
-    plt.legend()
-    plt.savefig('./data/video_'+video_num+'_window_'+str(N)+'.png')
-    plt.cla()
+    vars = []
+    print('video num', video_num)
+    video_pxl_list = video_miou_dict[video_num]
+    for i in range(len(roi_size_list)):
+        pxl_size = roi_size_list[i]
+        miou_list = video_pxl_list[pxl_size]
+        mv = np.var(miou_list)
+        print('pxl_size',pxl_size,'var :',mv)
+        miou_list_non_zero = [e for e in miou_list if e != 0]
+        mnv = np.var(miou_list_non_zero)
+        print('pxl_size',pxl_size,'var :',mnv,' (non zero)')
+        #vars.append((mv+mnv)/2)
+        vars.append(mv)
+    print('px120 / px200 :',vars[0] / vars[2])
+    print('px160 / px200 :',vars[1] / vars[2])
