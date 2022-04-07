@@ -3,8 +3,10 @@ import json
 from collections import OrderedDict
 
 def convert_log_to_json():
-    video_list = ['1','2','3','4','6']
-    roi_size_list = ['120','160','200']
+    #video_list = ['1','2','3','4','6']
+    video_list = ['1']
+    #roi_size_list = ['120','160','200']
+    roi_size_list = ['full']
     for video_num in video_list:
         for roi_size in roi_size_list:
             frame_dict = OrderedDict()
@@ -37,8 +39,8 @@ def select_person_bbox_from_gt():
                     person_box_list.append(box)
             if len(person_box_list) != 0:
                 new_gt_dict[gt_key] = person_box_list
-        with open('./frame_statistics/gt_'+video_num+'_person.json', 'w') as gt_json:
+        with open('./data/gt_'+video_num+'_person.json', 'w') as gt_json:
             json.dump(new_gt_dict, gt_json, indent='\t')
 
-#convert_log_to_json()
-select_person_bbox_from_gt()
+convert_log_to_json()
+#select_person_bbox_from_gt()

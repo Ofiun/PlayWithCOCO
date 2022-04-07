@@ -50,20 +50,21 @@ def get_miou(log_boxes, gt_boxes):
         ious.append(0)
     return sum(ious)/len(ious)
 
-video_list = ['1','2','3','4','6']
-roi_size_list = ['120','160','200']
-#window_sizes = [1, 5, 10, 20, 30]
-window_sizes = [1]
+#video_list = ['1','2','3','4','6']
+video_list = ['1']
+roi_size_list = ['120','160','200','full']
+window_sizes = [10, 20, 40, 80]
+#window_sizes = [1]
 
 def get_miou_list():
     for window_size in window_sizes:
-        video_dict = {}
+        #video_dict = {}
         for video_num in video_list:
-            gt_dict = {}
+            #gt_dict = {}
             N = window_size
             with open('./data/gt_'+video_num+'_person.json','r') as gt_json:
                 gt_dict = json.load(gt_json)
-            miou_dict = {}
+            #miou_dict = {}
             for roi_size in roi_size_list:
                 log_dict = {}
                 with open('./data/log_'+video_num+'_'+roi_size+'.json','r') as log_json:
@@ -87,34 +88,43 @@ def get_miou_list():
                     else:
                         miou_list.append(0)
                 miou_list = np.convolve(miou_list, np.ones(N)/N, mode='valid')
-                miou_dict[str(roi_size)] = miou_list.tolist()
-                #plt.plot(range(len(miou_list)), miou_list, label=roi_size)
-            video_dict[str(video_num)] = miou_dict
-            '''plt.title('mIoU variations of Video '+video_num)
+                #miou_dict[str(roi_size)] = miou_list.tolist()
+                def get_normal_result(miou_list, roi_size):
+                    plt.plot(range(len(miou_list)), miou_list, label=roi_size)
+                def get_zoomed_result(startFrame, frameWidth, miou_list, roi_size):
+                    miou_list = miou_list[startFrame:startFrame+frameWidth]
+                    plt.plot(range(startFrame, startFrame+frameWidth), miou_list, label=roi_size)
+                get_normal_result(miou_list, roi_size)
+                #get_zoomed_result(12200, 200, miou_list, roi_size)
+            #video_dict[str(video_num)] = miou_dict
+            plt.title('mIoU variations of Video '+video_num)
             plt.xlabel('Frame Number')
             plt.ylabel('mIoU')
             plt.legend()
             plt.savefig('./data/video_'+video_num+'_window_'+str(N)+'.png')
-            plt.cla()'''
-        with open('./miou_list.json', 'w') as w:
-            json.dump(video_dict,w)
+            plt.cla()
+        '''with open('./miou_list.json', 'w') as w:
+            json.dump(video_dict,w)'''
 
-#get_miou_list()
-with open('./data/miou_list.json', 'r') as r:
-    video_miou_dict = json.load(r)
-for video_num in video_list:
-    vars = []
-    print('video num', video_num)
-    video_pxl_list = video_miou_dict[video_num]
-    for i in range(len(roi_size_list)):
-        pxl_size = roi_size_list[i]
-        miou_list = video_pxl_list[pxl_size]
-        mv = np.var(miou_list)
-        print('pxl_size',pxl_size,'var :',mv)
-        miou_list_non_zero = [e for e in miou_list if e != 0]
-        mnv = np.var(miou_list_non_zero)
-        print('pxl_size',pxl_size,'var :',mnv,' (non zero)')
-        #vars.append((mv+mnv)/2)
-        vars.append(mv)
-    print('px120 / px200 :',vars[0] / vars[2])
-    print('px160 / px200 :',vars[1] / vars[2])
+def get_variance_statistics():
+    with open('./data/miou_list.json', 'r') as r:
+        video_miou_dict = json.load(r)
+    for video_num in video_list:
+        vars = []
+        print('video num', video_num)
+        video_pxl_list = video_miou_dict[video_num]
+        for i in range(len(roi_size_list)):
+            pxl_size = roi_size_list[i]
+            miou_list = video_pxl_list[pxl_size]
+            mv = np.var(miou_list)
+            print('pxl_size',pxl_size,'var :',mv)
+            miou_list_non_zero = [e for e in miou_list if e != 0]
+            mnv = np.var(miou_list_non_zero)
+            print('pxl_size',pxl_size,'var :',mnv,' (non zero)')
+            #vars.append((mv+mnv)/2)
+            vars.append(mv)
+        print('px120 / px200 :',vars[0] / vars[2])
+        print('px160 / px200 :',vars[1] / vars[2])
+
+get_miou_list()
+#get_variance_statistics()
